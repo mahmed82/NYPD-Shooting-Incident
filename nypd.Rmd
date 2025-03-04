@@ -1,0 +1,215 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "MAB"
+date: "2025-02-26"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+
+
+## Introduction
+This report is created to analyzes the NYPD Shooting Incident dataset obtained from NYC Open Data. 
+This activity includes cleaning, explore, and analyze the data to find trends and insights
+Also, will visualize some aspects in our jurny of data exploration
+Will build a predictive model and train it on subset of the data, along with a discussion of potential biases.
+
+
+## Dataset Description
+
+The dataset used in this analysis is the **NYPD Shooting Incident Data**, obtained from NYC Open Data.  
+It contains records of shooting incidents in New York City, with attributes related to:
+- **Incident details** (date, borough, location type)
+- **Victim characteristics** (gender, race)
+- **Perpetrator details** (gender, race)
+- **Weapon type & law enforcement responses**
+
+This dataset provides insights into trends and disparities in gun violence across different demographics and locations.
+
+
+
+## Data Import and Cleaning
+
+```{r load-libraries}
+# Load required libraries for data manipulation, visualization, and modeling
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(caret)
+```
+
+```{r import-data}
+# Import the NYPD Shooting Incident dataset from NYC Open Data
+data_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_data <- read.csv(data_url, stringsAsFactors = FALSE)
+```
+
+### Inspecting Data
+
+```{r data-summary}
+# Display structure and summary statistics of the dataset
+str(nypd_data)
+summary(nypd_data)
+
+# Select the top 5 records
+top_5_records <- head(nypd_data, 5)
+
+# Print the result
+print(top_5_records)
+```
+
+### Data Cleaning
+
+```{r data-cleaning}
+# Perform data cleaning by converting dates and removing unnecessary columns
+nypd_data$OCCUR_DATE <- mdy(nypd_data$OCCUR_DATE)
+
+# Remove unnecessary columns
+nypd_data <- nypd_data %>% select(-c(JURISDICTION_CODE, INCIDENT_KEY))
+
+# Convert categorical variables to factors
+nypd_data <- nypd_data %>% mutate(
+  BORO = as.factor(BORO),
+  LOCATION_DESC = as.factor(LOCATION_DESC),
+  PERP_SEX = as.factor(PERP_SEX),
+  PERP_RACE = as.factor(PERP_RACE),
+  VIC_SEX = as.factor(VIC_SEX),
+  VIC_RACE = as.factor(VIC_RACE)
+)
+```
+
+## Exploratory Data Analysis
+
+### Number of Incidents by Borough
+
+```{r borough-incidents}
+# Visualize the number of shooting incidents by borough using a bar chart
+ggplot(nypd_data, aes(x = BORO)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Number of Shooting Incidents by Borough",
+       x = "Borough", y = "Count")
+```
+
+### Trend of Shootings Over Time
+
+```{r shootings-trend}
+# Plot the trend of shooting incidents over time
+ggplot(nypd_data, aes(x = OCCUR_DATE)) +
+  geom_histogram(binwidth = 30, fill = "red", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Trend of Shooting Incidents Over Time",
+       x = "Date", y = "Number of Incidents")
+```
+
+## Predictive Modeling: Logistic Regression
+We will attempt to predict whether a victim is **male or female** based on available data.
+
+```{r model-prep}
+# Prepare the data for predictive modeling by selecting relevant variables and splitting into training and testing sets
+model_data <- nypd_data %>% select(VIC_SEX, BORO, PERP_SEX, PERP_RACE, VIC_RACE) %>% na.omit()
+
+# Encode VIC_SEX as binary outcome
+model_data$VIC_SEX <- ifelse(model_data$VIC_SEX == "M", 1, 0) 
+
+# Split data into training and testing sets
+set.seed(123)
+train_index <- createDataPartition(model_data$VIC_SEX, p = 0.7, list = FALSE)
+train_data <- model_data[train_index, ]
+test_data <- model_data[-train_index, ]
+```
+
+### Train a Logistic Regression Model
+
+```{r train-model}
+# Train a logistic regression model.
+#The logistic regression model is used to predict the probability of a victim being male or female based on selected features. #It estimates the relationship between predictor variables and the binary outcome using the log-odds function.
+
+logit_model <- glm(VIC_SEX ~ ., data = train_data, family = binomial)
+summary(logit_model)
+```
+
+### Model Evaluation
+
+```{r evaluate-model}
+# Evaluate the model performance using a confusion matrix
+predictions <- predict(logit_model, newdata = test_data, type = "response")
+
+test_data$Predicted <- ifelse(predictions > 0.5, 1, 0)
+
+# Confusion Matrix
+conf_matrix <- table(test_data$VIC_SEX, test_data$Predicted)
+conf_matrix
+```
+```{r confusion-matrix-heatmap}
+
+# Visualize the confusion matrix as a heatmap
+
+library(ggplot2)
+library(caret)
+
+# Create confusion matrix
+data_frame_conf <- as.data.frame(conf_matrix)
+colnames(data_frame_conf) <- c("Actual", "Predicted", "Count")
+
+ggplot(data_frame_conf, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile() +
+  geom_text(aes(label = Count), color = "white", size = 5) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix: Actual vs. Predicted", x = "Actual", y = "Predicted")
+```
+
+### Bar Chart Comparison
+
+```{r bar-chart-comparison}
+# Create a dataframe for plotting
+compare_df <- data.frame(
+  Category = rep(c("Actual Female", "Actual Male", "Predicted Female", "Predicted Male"), each = 1),
+  Count = c(sum(test_data$VIC_SEX == 0), sum(test_data$VIC_SEX == 1),
+            sum(test_data$Predicted == 0), sum(test_data$Predicted == 1))
+)
+
+ggplot(compare_df, aes(x = Category, y = Count, fill = Category)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Actual vs. Predicted Count Comparison", x = "Category", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Identifying Bias in the Data
+
+Bias in crime-related datasets is a critical concern. Several sources of bias can influence the accuracy and fairness of our analysis:
+
+- ** eporting Bias**: Not all incidents are reported equally. Differences in policing practices and community relations may lead to **underreporting** in certain neighborhoods.
+- **Selection Bias**: The dataset only includes **reported** shootings, meaning incidents **without police involvement** are missing.
+- **Measurement Bias**: Some variables, like **race and gender classifications**, are subject to misclassification due to incomplete or inconsistent data collection.
+- **Missing Data Bias**: The dataset has **many missing perpetrator details** (e.g., unknown gender or race), which could skew the predictive model.
+- **Model Assumption Bias**: The logistic regression model assumes **linear relationships**, which may oversimplify crime patterns.
+
+These biases highlight the **limitations of predictive modeling in social datasets** and emphasize the importance of ethical interpretation.
+
+## Conclusion
+
+This analysis explored NYC shooting data, identified trends, and built a predictive model to analyze victim demographics.  
+**Key Takeaways:**
+- **Temporal Trends**: The number of shooting incidents fluctuates over time, influenced by external factors such as policy changes, crime prevention efforts, and social conditions.
+- **Borough-Level Insights**: Incidents are **not evenly distributed** across boroughs, indicating geographic disparities.
+- **Predictive Modeling**: The logistic regression model provided an initial approach to predicting victim gender, though **limitations in data and model assumptions restrict accuracy**.
+- **Bias Considerations**: Our analysis highlights **systemic biases** in how crime data is collected and reported, which must be accounted for in any policy discussions.
+
+**Future Work:**
+- Explore **alternative models**, such as **random forests or deep learning**, to capture nonlinear relationships.
+- Investigate **interactions between race, location, and other socio-economic factors** in crime analysis.
+- Advocate for **better data collection methods** to improve fairness and reduce bias in predictive crime modeling.
+
+
+---
